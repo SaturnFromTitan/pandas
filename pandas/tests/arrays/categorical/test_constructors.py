@@ -16,6 +16,7 @@ from pandas import (
     Index,
     Interval,
     IntervalIndex,
+    MultiIndex,
     NaT,
     Series,
     Timestamp,
@@ -23,7 +24,7 @@ from pandas import (
     period_range,
     timedelta_range,
 )
-import pandas.util.testing as tm
+import pandas._testing as tm
 
 
 class TestCategoricalConstructors:
@@ -276,23 +277,19 @@ class TestCategoricalConstructors:
     def test_constructor_with_generator(self):
         # This was raising an Error in isna(single_val).any() because isna
         # returned a scalar for a generator
-        xrange = range
 
         exp = Categorical([0, 1, 2])
         cat = Categorical((x for x in [0, 1, 2]))
         tm.assert_categorical_equal(cat, exp)
-        cat = Categorical(xrange(3))
+        cat = Categorical(range(3))
         tm.assert_categorical_equal(cat, exp)
-
-        # This uses xrange internally
-        from pandas.core.index import MultiIndex
 
         MultiIndex.from_product([range(5), ["a", "b", "c"]])
 
         # check that categories accept generators and sequences
         cat = Categorical([0, 1, 2], categories=(x for x in [0, 1, 2]))
         tm.assert_categorical_equal(cat, exp)
-        cat = Categorical([0, 1, 2], categories=xrange(3))
+        cat = Categorical([0, 1, 2], categories=range(3))
         tm.assert_categorical_equal(cat, exp)
 
     @pytest.mark.parametrize(
@@ -410,6 +407,11 @@ class TestCategoricalConstructors:
     def test_constructor_str_unknown(self):
         with pytest.raises(ValueError, match="Unknown dtype"):
             Categorical([1, 2], dtype="foo")
+
+    def test_constructor_np_strs(self):
+        # GH#31499 Hastable.map_locations needs to work on np.str_ objects
+        cat = pd.Categorical(["1", "0", "1"], [np.str_("0"), np.str_("1")])
+        assert all(isinstance(x, np.str_) for x in cat.categories)
 
     def test_constructor_from_categorical_with_dtype(self):
         dtype = CategoricalDtype(["a", "b", "c"], ordered=True)
@@ -608,6 +610,6 @@ class TestCategoricalConstructors:
     @pytest.mark.skipif(_np_version_under1p16, reason="Skipping for NumPy <1.16")
     def test_constructor_string_and_tuples(self):
         # GH 21416
-        c = pd.Categorical(["c", ("a", "b"), ("b", "a"), "c"])
+        c = pd.Categorical(np.array(["c", ("a", "b"), ("b", "a"), "c"], dtype=object))
         expected_index = pd.Index([("a", "b"), ("b", "a"), "c"])
         assert c.categories.equals(expected_index)

@@ -99,6 +99,11 @@ def ensure_datetime64ns(arr: ndarray, copy: bool=True):
 
     shape = (<object>arr).shape
 
+    if (<object>arr).dtype.byteorder == ">":
+        # GH#29684 we incorrectly get OutOfBoundsDatetime if we dont swap
+        dtype = arr.dtype
+        arr = arr.astype(dtype.newbyteorder("<"))
+
     ivalues = arr.view(np.int64).ravel()
 
     result = np.empty(shape, dtype=NS_DTYPE)
@@ -202,31 +207,6 @@ def datetime_to_datetime64(object[:] values):
     return result, inferred_tz
 
 
-cdef inline maybe_datetimelike_to_i8(object val):
-    """
-    Try to convert to a nanosecond timestamp.  Fall back to returning the
-    input value.
-
-    Parameters
-    ----------
-    val : object
-
-    Returns
-    -------
-    val : int64 timestamp or original input
-    """
-    cdef:
-        npy_datetimestruct dts
-    try:
-        return val.value
-    except AttributeError:
-        if is_datetime64_object(val):
-            return get_datetime64_value(val)
-        elif PyDateTime_Check(val):
-            return convert_datetime_to_tsobject(val, None).value
-        return val
-
-
 # ----------------------------------------------------------------------
 # _TSObject Conversion
 
@@ -241,27 +221,6 @@ cdef class _TSObject:
     def value(self):
         # This is needed in order for `value` to be accessible in lib.pyx
         return self.value
-
-
-cpdef int64_t pydt_to_i8(object pydt) except? -1:
-    """
-    Convert to int64 representation compatible with numpy datetime64; converts
-    to UTC
-
-    Parameters
-    ----------
-    pydt : object
-
-    Returns
-    -------
-    i8value : np.int64
-    """
-    cdef:
-        _TSObject ts
-
-    ts = convert_to_tsobject(pydt, None, None, 0, 0)
-
-    return ts.value
 
 
 cdef convert_to_tsobject(object ts, object tz, object unit,
@@ -444,15 +403,15 @@ cdef _TSObject convert_str_to_tsobject(object ts, object tz, object unit,
                                        bint dayfirst=False,
                                        bint yearfirst=False):
     """
-    Convert a string-like (bytes or unicode) input `ts`, along with optional
-    timezone object `tz` to a _TSObject.
+    Convert a string input `ts`, along with optional timezone object`tz`
+    to a _TSObject.
 
     The optional arguments `dayfirst` and `yearfirst` are passed to the
     dateutil parser.
 
     Parameters
     ----------
-    ts : bytes or unicode
+    ts : str
         Value to be converted to _TSObject
     tz : tzinfo or None
         timezone for the timezone-aware output

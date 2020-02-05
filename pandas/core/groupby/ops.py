@@ -14,6 +14,7 @@ import numpy as np
 from pandas._libs import NaT, iNaT, lib
 import pandas._libs.groupby as libgroupby
 import pandas._libs.reduction as libreduction
+from pandas._typing import FrameOrSeries
 from pandas.errors import AbstractMethodError
 from pandas.util._decorators import cache_readonly
 
@@ -30,20 +31,20 @@ from pandas.core.dtypes.common import (
     is_extension_array_dtype,
     is_integer_dtype,
     is_numeric_dtype,
+    is_period_dtype,
     is_sparse,
     is_timedelta64_dtype,
     needs_i8_conversion,
 )
 from pandas.core.dtypes.missing import _maybe_fill, isna
 
-from pandas._typing import FrameOrSeries
 import pandas.core.algorithms as algorithms
 from pandas.core.base import SelectionMixin
 import pandas.core.common as com
 from pandas.core.frame import DataFrame
 from pandas.core.generic import NDFrame
 from pandas.core.groupby import base, grouper
-from pandas.core.index import Index, MultiIndex, ensure_index
+from pandas.core.indexes.api import Index, MultiIndex, ensure_index
 from pandas.core.series import Series
 from pandas.core.sorting import (
     compress_group_index,
@@ -164,8 +165,8 @@ class BaseGrouper:
             com.get_callable_name(f) not in base.plotting_methods
             and isinstance(splitter, FrameSplitter)
             and axis == 0
-            # apply_frame_axis0 doesn't allow MultiIndex
-            and not isinstance(sdata.index, MultiIndex)
+            # fast_apply/libreduction doesn't allow non-numpy backed indexes
+            and not sdata.index._has_complex_internals
         ):
             try:
                 result_values, mutated = splitter.fast_apply(f, group_keys)
@@ -350,7 +351,7 @@ class BaseGrouper:
 
     def _is_builtin_func(self, arg):
         """
-        if we define an builtin function for this argument, return it,
+        if we define a builtin function for this argument, return it,
         otherwise return the arg
         """
         return SelectionMixin._builtin_table.get(arg, arg)
@@ -543,6 +544,17 @@ class BaseGrouper:
             if mask.any():
                 result = result.astype("float64")
                 result[mask] = np.nan
+        elif (
+            how == "add"
+            and is_integer_dtype(orig_values.dtype)
+            and is_extension_array_dtype(orig_values.dtype)
+        ):
+            # We need this to ensure that Series[Int64Dtype].resample().sum()
+            # remains int64 dtype.
+            # Two options for avoiding this special case
+            # 1. mask-aware ops and avoid casting to float with NaN above
+            # 2. specify the result dtype when calling this method
+            result = result.astype("int64")
 
         if kind == "aggregate" and self._filter_empty_groups and not counts.all():
             assert result.ndim != 2
@@ -556,14 +568,21 @@ class BaseGrouper:
         if swapped:
             result = result.swapaxes(0, axis)
 
-        if is_datetime64tz_dtype(orig_values.dtype):
+        if is_datetime64tz_dtype(orig_values.dtype) or is_period_dtype(
+            orig_values.dtype
+        ):
+            # We need to use the constructors directly for these dtypes
+            # since numpy won't recognize them
+            # https://github.com/pandas-dev/pandas/issues/31471
             result = type(orig_values)(result.astype(np.int64), dtype=orig_values.dtype)
         elif is_datetimelike and kind == "aggregate":
             result = result.astype(orig_values.dtype)
 
         return result, names
 
-    def aggregate(self, values, how: str, axis: int = 0, min_count: int = -1):
+    def aggregate(
+        self, values, how: str, axis: int = 0, min_count: int = -1
+    ) -> Tuple[np.ndarray, Optional[List[str]]]:
         return self._cython_operation(
             "aggregate", values, how, axis, min_count=min_count
         )
@@ -614,8 +633,8 @@ class BaseGrouper:
             # TODO: can we get a performant workaround for EAs backed by ndarray?
             return self._aggregate_series_pure_python(obj, func)
 
-        elif isinstance(obj.index, MultiIndex):
-            # MultiIndex; Pre-empt TypeError in _aggregate_series_fast
+        elif obj.index._has_complex_internals:
+            # Pre-empt TypeError in _aggregate_series_fast
             return self._aggregate_series_pure_python(obj, func)
 
         try:
@@ -663,10 +682,7 @@ class BaseGrouper:
                     if len(res) == 1:
                         # e.g. test_agg_lambda_with_timezone lambda e: e.head(1)
                         # FIXME: are we potentially losing import res.index info?
-
-                        # TODO: use `.item()` if/when we un-deprecate it.
-                        # For non-Series we could just do `res[0]`
-                        res = next(iter(res))
+                        res = res.item()
                     else:
                         raise ValueError("Function does not reduce")
                 result = np.empty(ngroups, dtype="O")

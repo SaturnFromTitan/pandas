@@ -7,6 +7,7 @@ current implementation is not efficient.
 """
 import copy
 import itertools
+from typing import Type
 
 import numpy as np
 import pyarrow as pa
@@ -29,17 +30,18 @@ class ArrowBoolDtype(ExtensionDtype):
     na_value = pa.NULL
 
     @classmethod
-    def construct_from_string(cls, string):
-        if string == cls.name:
-            return cls()
-        else:
-            raise TypeError(f"Cannot construct a '{cls}' from '{string}'")
+    def construct_array_type(cls) -> Type["ArrowBoolArray"]:
+        """
+        Return the array type associated with this dtype.
 
-    @classmethod
-    def construct_array_type(cls):
+        Returns
+        -------
+        type
+        """
         return ArrowBoolArray
 
-    def _is_boolean(self):
+    @property
+    def _is_boolean(self) -> bool:
         return True
 
 
@@ -52,14 +54,14 @@ class ArrowStringDtype(ExtensionDtype):
     na_value = pa.NULL
 
     @classmethod
-    def construct_from_string(cls, string):
-        if string == cls.name:
-            return cls()
-        else:
-            raise TypeError(f"Cannot construct a '{cls}' from '{string}'")
+    def construct_array_type(cls) -> Type["ArrowStringArray"]:
+        """
+        Return the array type associated with this dtype.
 
-    @classmethod
-    def construct_array_type(cls):
+        Returns
+        -------
+        type
+        """
         return ArrowStringArray
 
 

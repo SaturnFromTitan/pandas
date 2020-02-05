@@ -7,44 +7,23 @@ import pytest
 from pandas.core.dtypes.generic import ABCDateOffset
 
 import pandas as pd
-from pandas import (
-    DatetimeIndex,
-    Index,
-    PeriodIndex,
-    Series,
-    Timestamp,
-    bdate_range,
-    date_range,
-)
-from pandas.tests.base.test_ops import Ops
-import pandas.util.testing as tm
+from pandas import DatetimeIndex, Index, Series, Timestamp, bdate_range, date_range
+import pandas._testing as tm
 
 from pandas.tseries.offsets import BDay, BMonthEnd, CDay, Day, Hour
 
 START, END = datetime(2009, 1, 1), datetime(2010, 1, 1)
 
 
-class TestDatetimeIndexOps(Ops):
-    def setup_method(self, method):
-        super().setup_method(method)
-        mask = lambda x: (isinstance(x, DatetimeIndex) or isinstance(x, PeriodIndex))
-        self.is_valid_objs = [o for o in self.objs if mask(o)]
-        self.not_valid_objs = [o for o in self.objs if not mask(o)]
-
-    def test_ops_properties(self):
-        f = lambda x: isinstance(x, DatetimeIndex)
-        self.check_ops_properties(DatetimeIndex._field_ops, f)
-        self.check_ops_properties(DatetimeIndex._object_ops, f)
-        self.check_ops_properties(DatetimeIndex._bool_ops, f)
-
-    def test_ops_properties_basic(self):
+class TestDatetimeIndexOps:
+    def test_ops_properties_basic(self, datetime_series):
 
         # sanity check that the behavior didn't change
         # GH#7206
-        msg = "'Series' object has no attribute '{}'"
         for op in ["year", "day", "second", "weekday"]:
-            with pytest.raises(AttributeError, match=msg.format(op)):
-                getattr(self.dt_series, op)
+            msg = f"'Series' object has no attribute '{op}'"
+            with pytest.raises(AttributeError, match=msg):
+                getattr(datetime_series, op)
 
         # attribute access should still work!
         s = Series(dict(year=2000, month=1, day=10))
@@ -436,18 +415,6 @@ class TestDatetimeIndexOps(Ops):
         # setting with non-freq string
         with pytest.raises(ValueError, match="Invalid frequency"):
             idx._data.freq = "foo"
-
-    def test_offset_deprecated(self):
-        # GH 20716
-        idx = pd.DatetimeIndex(["20180101", "20180102"])
-
-        # getter deprecated
-        with tm.assert_produces_warning(FutureWarning):
-            idx.offset
-
-        # setter deprecated
-        with tm.assert_produces_warning(FutureWarning):
-            idx.offset = BDay()
 
 
 class TestBusinessDatetimeIndex:
